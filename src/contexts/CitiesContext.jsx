@@ -1,51 +1,94 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useReducer,
+  useState,
+} from 'react';
 
 const BASE_URL = 'http://localhost:8000';
 
 const CitiesContext = createContext();
 
+const initialState = {
+  cities: [],
+  isLoading: false,
+  currentCity: {},
+  error: '',
+};
+
+function reducer(state = initialState, { type, payload }) {
+  switch (type) {
+    case 'loading':
+      return { ...state, isLoading: true };
+    case 'cities/loaded':
+      return { ...state, isLoading: false, cities: payload };
+    case 'city/loaded':
+      return { ...state, isLoading: false, currentCity: payload };
+    case 'city/created':
+      return {
+        ...state,
+        isLoading: false,
+        cities: [...state.cities, payload],
+        currentCity: payload,
+      };
+    case 'city/deleted':
+      return {
+        ...state,
+        isLoading: false,
+        cities: state.cities.filter((c) => c.id !== payload),
+        currentCity: {},
+      };
+    case 'rejected':
+      return { ...state, isLoading: false, error: payload };
+    default:
+      throw new Error('Invalid type: ' + type);
+  }
+}
+
 function CitiesProvider({ children }) {
-  const [cities, setCities] = useState([]);
-  const [currentCity, setCurrentCity] = useState({});
-  const [isLoading, setIsLoading] = useState(false);
+  const [{ cities, isLoading, currentCity, error }, dispatch] = useReducer(
+    reducer,
+    initialState
+  );
 
   useEffect(() => {
+    const controller = new AbortController();
     async function fetchCities() {
+      dispatch({ type: 'loading' });
       try {
-        setIsLoading(true);
-        const res = await fetch(`${BASE_URL}/cities`);
+        const res = await fetch(`${BASE_URL}/cities`, {
+          signal: controller.signal,
+        });
         const data = await res.json();
-        setCities(data);
+        dispatch({ type: 'cities/loaded', payload: data });
       } catch (error) {
-        console.log(error);
-      } finally {
-        setIsLoading(false);
+        dispatch({ type: 'rejected', payload: error.message });
       }
     }
 
     fetchCities();
 
-    // return () => {
-    //   second
-    // }
+    return () => {
+      controller.abort();
+    };
   }, []);
 
   async function getCity(id) {
+    if (Number(id) === currentCity.id) return;
+    dispatch({ type: 'loading' });
     try {
-      setIsLoading(true);
       const res = await fetch(`${BASE_URL}/cities/${id}`);
       const data = await res.json();
-      setCurrentCity(data);
+      dispatch({ type: 'city/loaded', payload: data });
     } catch (error) {
-      console.log(error);
-    } finally {
-      setIsLoading(false);
+      dispatch({ type: 'rejected', payload: error.message });
     }
   }
 
   async function createCity(newCity) {
+    dispatch({ type: 'loading' });
     try {
-      setIsLoading(true);
       const res = await fetch(`${BASE_URL}/cities`, {
         method: 'POST',
         body: JSON.stringify(newCity),
@@ -54,25 +97,21 @@ function CitiesProvider({ children }) {
         },
       });
       const data = await res.json();
-      setCities([...cities, data]);
+      dispatch({ type: 'city/created', payload: data });
     } catch (error) {
-      console.log(error);
-    } finally {
-      setIsLoading(false);
+      dispatch({ type: 'rejected', payload: error.message });
     }
   }
 
   async function deleteCity(id) {
+    dispatch({ type: 'loading' });
     try {
-      setIsLoading(true);
       await fetch(`${BASE_URL}/cities/${id}`, {
         method: 'DELETE',
       });
-      setCities(cities.filter((c) => c.id !== id));
+      dispatch({ type: 'city/deleted', payload: id });
     } catch (error) {
-      console.log(error);
-    } finally {
-      setIsLoading(false);
+      dispatch({ type: 'rejected', payload: error.message });
     }
   }
   return (
@@ -84,6 +123,7 @@ function CitiesProvider({ children }) {
         getCity,
         createCity,
         deleteCity,
+        error,
       }}
     >
       {children}
